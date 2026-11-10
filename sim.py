@@ -1,6 +1,7 @@
 import csv  # Manejo de la archivo csv
 import sys  
-
+from rich.console import console
+from rich.table import Table
 
 #Ordenamiento de lista
 
