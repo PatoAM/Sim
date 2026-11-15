@@ -56,17 +56,24 @@ def csvtolist(ruta):
         
         if len(fila) != 4:
             raise SystemExit(f"Proceso {n}: se esperan 4 campos (id,tam,arribo,irrupcion).")
-        try:
-            pid, tam, arribo, irrupcion = (int(c.strip()) for c in fila)
-        except ValueError:
-            raise SystemExit(f"Proceso {n}: formato incorrecto, se esperan campos numéricos enteros.")
+        
 
+        pid = fila[0].strip()
+
+        if not pid:
+            raise SystemExit(f"Proceso {n}: el Id no puede estar vacio")
+        
+        try:
+            arribo, irrupcion, tam = (int(c.strip()) for c in fila [1:])
+        except ValueError:
+            raise SystemExit(f"Proceso {n},")
         if pid in ids:
             raise SystemExit(f"Proceso {n}: el Id {pid} está repetido.")
         if tam <= 0 or irrupcion <= 0 or arribo < 0:
             raise SystemExit(f"Proceso {n}: tamaño e irrupción deben ser > 0 y el arribo >= 0.")
         if tam > MEM_USER:
             raise SystemExit(f"Proceso {n}: pide {tam}K y la memoria de usuario es de {MEM_USER}K.")
+        
         ids.add(pid)
         Arribos.append({"id": pid, "tam": tam, "arribo": arribo,
                         "irrupcion": irrupcion, "TI": irrupcion})
@@ -145,7 +152,7 @@ def mostrar(t, eventos):
 
     if Ejecucion:
         p = Ejecucion[0]
-        print(Panel.fit(f"\nProcesador: P{p['id']} (TI {p['TI']} de {p['irrupcion']}) \n"))
+        print(Panel.fit(f"\nProcesador: {p['id']} (TI {p['TI']} de {p['irrupcion']}) \n"))
     else:
         print(Panel.fit("\nProcesador: ocioso\n"))
 
@@ -159,7 +166,7 @@ def mostrar(t, eventos):
         if x["pid"] is None:
             tabla.add_row(str(x['id']),str(x['inicio']), str(x['tam']),'libre', '-', style="yellow")
         else:
-            tabla.add_row(str(x['id']),str(x['inicio']),str(x['tam']),'P'+str(x['pid']),'0')
+            tabla.add_row(str(x['id']),str(x['inicio']),str(x['tam']),str(x['pid']),'0')
     console.print(tabla)
 
     print(f"\nListos:                 {fmt(Listos)}")
@@ -183,7 +190,7 @@ def informe(t_total):
     for p in sorted(Finalizados, key=lambda p: p["id"]):
         p["retorno"] = p["fin"] - p["arribo"]
         p["espera"] = p["retorno"] - p["irrupcion"]
-        tabla2.add_row('P'+str(p['id']), str(p['arribo']),str(p['irrupcion']),str(p['fin']),str(p['retorno']),str(p['espera']))
+        tabla2.add_row(''+str(p['id']), str(p['arribo']),str(p['irrupcion']),str(p['fin']),str(p['retorno']),str(p['espera']))
     console.print(tabla2)
 
     n = len(Finalizados)
@@ -210,10 +217,10 @@ def main():
             part = best_fit(p)
             if part:
                 Listos.append(p)
-                eventos.append(f"Arribó P{p['id']} -> Listos (partición {part['id']})")
+                eventos.append(f"Arribó {p['id']} -> Listos (partición {part['id']})")
             else:
                 ListSus.append(p)
-                eventos.append(f"Arribó P{p['id']} -> Listos y suspendidos (no hay hueco)")
+                eventos.append(f"Arribó {p['id']} -> Listos y suspendidos (no hay hueco)")
 
         # b) SRTF: vemos quién tiene que estar en la CPU
         planificar()
@@ -231,13 +238,13 @@ def main():
                 p["fin"] = t
                 liberar(p)
                 Finalizados.append(Ejecucion.pop())
-                eventos = [f"Terminó P{p['id']}"]
+                eventos = [f"Terminó {p['id']}"]
                 for q in ListSus[:]:
                     part = best_fit(q)
                     if part:
                         ListSus.remove(q)
                         Listos.append(q)
-                        eventos.append(f"P{q['id']} pasa de Listos y suspendidos a Listos (partición {part['id']})")
+                        eventos.append(f"{q['id']} pasa de Listos y suspendidos a Listos (partición {part['id']})")
                 planificar()
                 mostrar(t, eventos)
         else:
