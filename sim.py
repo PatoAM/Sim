@@ -1,207 +1,251 @@
-import csv  # Manejo de la archivo csv
-import sys  
-from rich.console import console
+# Simulador de memoria (MVT con Best-Fit) y planificación SRTF.
+# El CSV tiene que tener:  id,tam,arribo,irrupcion  (el encabezado es opcional)
+import csv
+import sys
+from rich.console import Console
 from rich.table import Table
+from rich import print
+<ScrollWheelDown>
 
-#Ordenamiento de lista
+MEM_SO = 100          
+MEM_USER = 450       
+MAX_EN_SISTEMA = 5    # tope entre Ejecución + Listos + Listos/Suspendidos
+MAX_PROCESOS = 10   
 
-def srtf(columna):
-    return lambda x: x[columna] 
-
-def contar_procesos():
-    return len(Listos) + len(ListSus) + len(Ejecucion) + len(Arribos)
-
-def memlibre(mem):
-    return 550 - mem
-
-def expropiar(x=0):
-    global Listos
-    global Ejecucion
-    Listos.append(Ejecucion.pop(0))
-    Ejecucion.append(Listos.pop(x))
-    Listos.sort(key=srtf(3), reverse=False) 
-
-
-#Listas utilizadas: 
-Arribos = []
+Arribos = []       
 Listos = []
-ListSus = []
-Ejecucion= []
+ListSus = []      
+Ejecucion = []     
 Finalizados = []
 
+# Tabla de particiones de la memoria de usuario. Si pid es None, es un hueco libre
+particiones = [{"id": 1, "inicio": MEM_SO, "tam": MEM_USER, "pid": None}]
+_sig_id_particion = 2
 
-
-# Tratar: el archivo tiene que existir, no puede tener mas de 10 elementos, el formato tiene que ser el correcto
-# la extension tiene que ser csv
+# Archivo de entrada
 def controldeArchivo():
-    try:
-        arg = sys.argv[1]
-    except IndexError:
+    if len(sys.argv) < 2:
         raise SystemExit(f"Ingrese: {sys.argv[0]} <archivo.csv>")
+    ruta = sys.argv[1]
+    if not ruta.lower().endswith(".csv"):
+        raise SystemExit(f"El archivo < {ruta} > debe tener extensión .csv")
     try:
-        with open(arg, "r") as f:
+        with open(ruta, "r"):
             pass
     except FileNotFoundError:
-        raise SystemExit(f"Archivo < {sys.argv[1]} > no encontrado")
+        raise SystemExit(f"Archivo < {ruta} > no encontrado")
+    return ruta
 
 
+def csvtolist(ruta):
+    with open(ruta, newline="") as f:
+        filas = [r for r in csv.reader(f) if any(c.strip() for c in r)]
+
+    # si la primera fila no es numérica, la tomamos como encabezado y la tiramos
+    if filas and not all(c.strip().lstrip("-").isdigit() for c in filas[0]):
+        filas.pop(0)
+
+    if not filas:
+        raise SystemExit("El archivo no contiene procesos.")
+    if len(filas) > MAX_PROCESOS:
+        raise SystemExit(f"El archivo tiene {len(filas)} procesos; el máximo es {MAX_PROCESOS}.")
+
+    ids = set()
+    for n, fila in enumerate(filas, start=1):
+        
+        if len(fila) != 4:
+            raise SystemExit(f"Proceso {n}: se esperan 4 campos (id,tam,arribo,irrupcion).")
+        try:
+            pid, tam, arribo, irrupcion = (int(c.strip()) for c in fila)
+        except ValueError:
+            raise SystemExit(f"Proceso {n}: formato incorrecto, se esperan campos numéricos enteros.")
+
+        if pid in ids:
+            raise SystemExit(f"Proceso {n}: el Id {pid} está repetido.")
+        if tam <= 0 or irrupcion <= 0 or arribo < 0:
+            raise SystemExit(f"Proceso {n}: tamaño e irrupción deben ser > 0 y el arribo >= 0.")
+        if tam > MEM_USER:
+            raise SystemExit(f"Proceso {n}: pide {tam}K y la memoria de usuario es de {MEM_USER}K.")
+        ids.add(pid)
+        Arribos.append({"id": pid, "tam": tam, "arribo": arribo,
+                        "irrupcion": irrupcion, "TI": irrupcion})
+
+    Arribos.sort(key=lambda p: (p["arribo"], p["id"]))
 
 
-def csvtolist():
-    global Arribos
-    
-    with open(sys.argv[1], newline='') as csvfile:
-        procesos = csv.reader(csvfile, delimiter="'", quotechar='"', quoting=csv.QUOTE_MINIMAL)
-    
-        for row in procesos: 
-            Arribos.append(row[0].split(","))
+# MEMORIA: Best-Fit con particiones variables
+
+def best_fit(p):
+    # Busca el hueco más chico donde entre p y se lo asigna.
+    # Devuelve la partición, o None si no hay ningún hueco que sirva.
+    global _sig_id_particion
+    huecos = [x for x in particiones if x["pid"] is None and x["tam"] >= p["tam"]]
+    if not huecos:
+        return None
+    h = min(huecos, key=lambda x: x["tam"])
+    if h["tam"] > p["tam"]:  # si sobra lugar, partimos el hueco y lo que sobra queda libre al lado
+        particiones.insert(particiones.index(h) + 1, {
+            "id": _sig_id_particion,
+            "inicio": h["inicio"] + p["tam"],
+            "tam": h["tam"] - p["tam"],
+            "pid": None,
+        })
+        _sig_id_particion += 1
+        h["tam"] = p["tam"]
+    h["pid"] = p["id"]
+    return h
 
 
-    Arribos.remove(Arribos[0])
-    try: 
-        Arribos = list(map(lambda x: list(map(lambda y: int(y), x)), Arribos))
-    except ValueError:
-        raise SystemExit(f"Formato incorrecto: se espera un archivo con campos numericos.")
-
-
-
-
-#································
-controldeArchivo()
-csvtolist()
-
-#-------------------------------------------------------------------------------------------------------
-
-#aca podria hacer un control de C_ Arribos, aca es mas facil de manipular porque es una lista
-#por ejemplo, si len(Arribos) > 10 lo boleteo a la conc
-#por ejemploi si resulta que alguna de las sublistas es len(x) > a 4, osea tiene mas de 4 campos, tambien.
-#por ejemplo, si alguna de los campos de la sublista x[i][1] es mayor a 450 (mem total disponible) tambien
-
-#Lo unico que tengo que no puedo hacer aca, es el try: except de tipos que tiene que ser arriba 
-##en la función de csvtolist. Ahi tengo que manejar la posibilidad de que el archivo tenga una palabra, un numero decimal
-##en la parte donde iria un numero. Y manejar el error : "ValueError". Simple. (Ya esta hecho)
-
-#-------------------------------------------------------------------------------------------------------
-
-
-print("Cola de Arribos")
-for row in Arribos:
-    print(row)
-
-Arribos.sort(key=srtf(2), reverse=False)
-
-print("Ordenado (Para la cola de listos)")
-
-for row in Arribos:
-    print(row)
-print("----------------------------------------------------------------------")
-
-
-#for x in range(5):
-#    listos.append(Arribos.pop(t))
-#
-#    print(Arribos)
-#    print(listos)
-#
-#print("Arribos:",Arribos)
-#print (listos)
-
-
-t = 0 
-procesos = contar_procesos()
-mem = 100 ## No puede superar los 550, que seria el total de memoria fisica. Solo 450kb es del usuario.
-dir_mem = [] 
-while procesos > 0 :
-    num_proc = procesos - len(Arribos)
-    
-    ### INCORPORACION DE PROCESOS NUEVOS A LISTOS O LISTSUS
-
-    #print(num_proc," | " ,Arribos[0][1], "|", memlibre(mem), "|", Arribos[0][0])  borrame
-    
-    if len(Arribos) > 0:
-        if (num_proc <= 5) and (Arribos[0][1] <= memlibre(mem)) and (Arribos[0][2] <= t):
-            i=0
-
-            while (Arribos[i][2] <= t) and (i <= len(Arribos)):
-                if (num_proc <= 5) and (Arribos[0][1] <= memlibre(mem)) and (Arribos[0][2] <= t):
-                    Listos.append(Arribos.pop(0))
-                    print("Listos", Listos)
-                    mem += Listos[0][1]
-                    Listos.sort(key=srtf(3), reverse=False)
-
-                elif (num_proc <= 5) and Arribos[0][2] <=t:
-                    ListSus.append(Arribos.pop(0))
-                    print("Listos suspendidos", ListSus)
-                
-                i+=1
-
-        elif (num_proc <= 5) and (Arribos[0][0] <= t):
-            ListSus.append(Arribos.pop(0))
-            print("Directo a listos suspendidos", ListSus)
-    
-    ### BUCLE DE "EJECUCION"
-    ## [La pregunta: ¿Puede entrar a listos, despues a ejecucion y descontar un t todo en el mismo loop?]
-    ## A fines practicos, supongamos que si. Pero hay que revisar.
-
-    ## Esta implementacion contempla a los procesos como si fueran liquidos y la memoria un "recipiente
-    ## con capacidad máxima 550ml. Si la memoria de un proceso es menor o igual a la memoria libre, entra.
-    ## Es decir, la logica de los huecos, best fit (mejor encaje) todavia no esta implementada.
-
-    ## Pero con esto suficiente para ir implementando el resto del loop principal:
-    ## Resumenes estadisticos, logica de colas, srtf, etc. 
-
-    if len(Ejecucion) == 0:
-        if len(Listos) > 0:
-            Ejecucion.append(Listos.pop(0))
-
-    elif (len(Listos) > 0) and (Ejecucion[0][3] > Listos[0][3]):
-        if Listos[0][1] <= memlibre(mem):
-            expropiar() 
+def liberar(p):
+    for x in particiones:
+        if x["pid"] == p["id"]:
+            x["pid"] = None
+    i = 0
+    while i < len(particiones) - 1:  # juntamos los huecos libres que quedaron pegados
+        a, b = particiones[i], particiones[i + 1]
+        if a["pid"] is None and b["pid"] is None:
+            a["tam"] += b["tam"]
+            particiones.pop(i + 1)
         else:
-            i=1
-            while (Listos[i][2] <= t) and (i <= len(Listos)) and (Ejecucion[0][3] > Listos[i][3]):
-                if Listos[i][1] <= memlibre(mem):
-                    expropiar(i)
+            i += 1
+
+
+def en_sistema():
+    return len(Listos) + len(ListSus) + len(Ejecucion)
+
+
+
+# Planificacion SRTF
+def planificar():
+    Listos.sort(key=lambda p: (p["TI"], p["arribo"]))
+    if not Listos:
+        return
+    if not Ejecucion:
+        Ejecucion.append(Listos.pop(0))
+    elif Listos[0]["TI"] < Ejecucion[0]["TI"]:  # llegó uno con menos tiempo TI: sale el actual y entra ese
+        Listos.append(Ejecucion.pop())
+        Ejecucion.append(Listos.pop(0))
+        Listos.sort(key=lambda p: (p["TI"], p["arribo"]))
+
+
+# Salida
+
+def fmt(lista):
+    if not lista:
+        return "(vacía)"
+    return ", ".join(f"P{p['id']}(TI={p['TI']}, tam={p['tam']}K)" for p in lista)
+
+
+def mostrar(t, eventos):
+    print("=" * 72)
+    print(f"t = {t}")
+    for e in eventos:
+        print(f"  * {e}")
+
+    if Ejecucion:
+        p = Ejecucion[0]
+        print(f"\nProcesador: P{p['id']} (TI {p['TI']} de {p['irrupcion']}) \n")
+    else:
+        print("\nProcesador: ocioso\n")
+
+    tabla = Table(title="Tabla de particiones", show_lines=True, style='blue')
+    tabla.add_column("id. Part")
+    tabla.add_column("Inicio")
+    tabla.add_column("Tamaño")
+    tabla.add_column("Proceso")
+    tabla.add_column("Frag. interna")
+    for x in particiones:
+        if x["pid"] is None:
+            tabla.add_row(str(x['id']),str(x['inicio']), str(x['tam']),'libre', '-', style="yellow")
+        else:
+            tabla.add_row(str(x['id']),str(x['inicio']),str(x['tam']),'P'+str(x['pid']),'0')
+
+    console = Console()
+    console.print(tabla)
+
+    print(f"\nListos:                 {fmt(Listos)}")
+    print(f"Listos y suspendidos:   {fmt(ListSus)}")
+    print(f"Nuevos (sin admitir):   {fmt(Arribos)}")
+    input("\nPresione Enter para continuar...")
+
+
+def informe(t_total):
+    print("=" * 72)
+    tabla2 = Table(title="INFORME ESTADÍSTICO", show_lines=True)
+
+    tabla2.add_column('Proceso')
+    tabla2.add_column('Arribo')
+    tabla2.add_column('Irrupción')
+    tabla2.add_column('Fin')
+    tabla2.add_column('Retorno')
+    tabla2.add_column('Espera')
     
-    if len(Ejecucion) == 1:
-        Ejecucion[0][3]-=1
+    for p in sorted(Finalizados, key=lambda p: p["id"]):
+        p["retorno"] = p["fin"] - p["arribo"]
+        p["espera"] = p["retorno"] - p["irrupcion"]
+        tabla2.add_row('P'+str(p['id']), str(p['arribo']),str(p['irrupcion']),str(p['fin']),str(p['retorno']),str(p['espera']))
+    console = Console()
+    console.print(tabla2)
 
-        if Ejecucion[0][3] == 0:
-            mem -= Ejecucion[0][1]
-            Finalizados.append(Ejecucion.pop(0))
-            if len(ListSus) > 0:
-                i=0
-                while i < len(ListSus):  ##Puede salir mas de uno de Listsus en un mismo t?
-                    if ListSus[i][1] <= memlibre(mem):
-                        mem+=ListSus[i][1]
-                        Listos.append(ListSus.pop(i))
-                        Listos.sort(key=srtf(3), reverse=False)
-                        i=0
-                    i+=1
-
-   
-    print(f"""
-    t = {t} \n
-    Memoria Ocupada:{mem} \n
-    Memoria libre: {memlibre(mem)} \n
-    Listos: {Listos} \n
-    ListSus: {ListSus} \n
-    Ejecucion: {Ejecucion} \n
-    Finalizados: {Finalizados}
-    """)
- 
-
-    t = t + 1
-    i = 1
-    procesos = contar_procesos()
-    for row in Listos:
-        print(f"Fila{i}", row)
-        i+=1
-
-    input("Presione una tecla")
-
-     
-
-    
+    n = len(Finalizados)
+    print(f"\nTiempo de retorno promedio: {sum(p['retorno'] for p in Finalizados) / n:.2f}")
+    print(f"Tiempo de espera promedio:  {sum(p['espera'] for p in Finalizados) / n:.2f}")
+    print(f"Rendimiento: {n} trabajos / {t_total} unidades = {n / t_total:.4f} trabajos por unidad de tiempo")
 
 
+def main():
+    ruta = controldeArchivo()
+    csvtolist(ruta)
+
+    t = 0
+    while Arribos or en_sistema() > 0:
+        # si no hay nadie en el sistema, saltamos directo al próximo arribo (así no mostramos ticks vacíos)
+        if en_sistema() == 0 and Arribos[0]["arribo"] > t:
+            t = Arribos[0]["arribo"]
+
+        eventos = []
+
+        # a) Entran los procesos nuevos (siempre que no pasemos los 5 en el sistema)
+        while Arribos and Arribos[0]["arribo"] <= t and en_sistema() < MAX_EN_SISTEMA:
+            p = Arribos.pop(0)
+            part = best_fit(p)
+            if part:
+                Listos.append(p)
+                eventos.append(f"Arribó P{p['id']} -> Listos (partición {part['id']})")
+            else:
+                ListSus.append(p)
+                eventos.append(f"Arribó P{p['id']} -> Listos y suspendidos (no hay hueco)")
+
+        # b) SRTF: vemos quién tiene que estar en la CPU
+        planificar()
+        if eventos:
+            mostrar(t, eventos)
+
+        # c) La CPU trabaja una unidad de tiempo
+        if Ejecucion:
+            p = Ejecucion[0]
+            p["TI"] -= 1
+            t += 1
+
+            # d) Si terminó: liberamos la memoria y vemos si algún suspendido ya entra
+            if p["TI"] == 0:
+                p["fin"] = t
+                liberar(p)
+                Finalizados.append(Ejecucion.pop())
+                eventos = [f"Terminó P{p['id']}"]
+                for q in ListSus[:]:
+                    part = best_fit(q)
+                    if part:
+                        ListSus.remove(q)
+                        Listos.append(q)
+                        eventos.append(f"P{q['id']} pasa de Listos y suspendidos a Listos (partición {part['id']})")
+                planificar()
+                mostrar(t, eventos)
+        else:
+            t += 1
+
+    informe(t)
+
+
+if __name__ == "__main__":
+    main()
