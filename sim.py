@@ -5,7 +5,8 @@ import sys
 from rich.console import Console
 from rich.table import Table
 from rich import print
-<ScrollWheelDown>
+from rich.panel import Panel
+from rich.rule import Rule
 
 MEM_SO = 100          
 MEM_USER = 450       
@@ -137,16 +138,16 @@ def fmt(lista):
 
 
 def mostrar(t, eventos):
-    print("=" * 72)
-    print(f"t = {t}")
+    console = Console()
+    console.rule(f"[bold cyan]Tick {t} - Estado de Memoria[/]")
     for e in eventos:
-        print(f"  * {e}")
+        print(f"* {e}")
 
     if Ejecucion:
         p = Ejecucion[0]
-        print(f"\nProcesador: P{p['id']} (TI {p['TI']} de {p['irrupcion']}) \n")
+        print(Panel.fit(f"\nProcesador: P{p['id']} (TI {p['TI']} de {p['irrupcion']}) \n"))
     else:
-        print("\nProcesador: ocioso\n")
+        print(Panel.fit("\nProcesador: ocioso\n"))
 
     tabla = Table(title="Tabla de particiones", show_lines=True, style='blue')
     tabla.add_column("id. Part")
@@ -159,8 +160,6 @@ def mostrar(t, eventos):
             tabla.add_row(str(x['id']),str(x['inicio']), str(x['tam']),'libre', '-', style="yellow")
         else:
             tabla.add_row(str(x['id']),str(x['inicio']),str(x['tam']),'P'+str(x['pid']),'0')
-
-    console = Console()
     console.print(tabla)
 
     print(f"\nListos:                 {fmt(Listos)}")
@@ -170,8 +169,9 @@ def mostrar(t, eventos):
 
 
 def informe(t_total):
-    print("=" * 72)
-    tabla2 = Table(title="INFORME ESTADÍSTICO", show_lines=True)
+    console = Console()    
+    console.rule("Fin de ejecución", style="dim green", characters="=")
+    tabla2 = Table(title="INFORME ESTADÍSTICO", show_edge=False , row_styles=["dim", ""])
 
     tabla2.add_column('Proceso')
     tabla2.add_column('Arribo')
@@ -184,7 +184,6 @@ def informe(t_total):
         p["retorno"] = p["fin"] - p["arribo"]
         p["espera"] = p["retorno"] - p["irrupcion"]
         tabla2.add_row('P'+str(p['id']), str(p['arribo']),str(p['irrupcion']),str(p['fin']),str(p['retorno']),str(p['espera']))
-    console = Console()
     console.print(tabla2)
 
     n = len(Finalizados)
