@@ -1,5 +1,4 @@
-# Simulador de memoria (MVT con Best-Fit) y planificación SRTF.
-# El CSV tiene que tener:  id,tam,arribo,irrupcion  (el encabezado es opcional)
+# El CSV tiene que tener:  id,arribo,irrupcion,tam  (el encabezado es opcional)
 import csv
 import sys
 from rich.console import Console
@@ -18,7 +17,7 @@ Listos = []
 ListSus = []      
 Ejecucion = []     
 Finalizados = []
-
+arribos_nuevo=dict()
 # Tabla de particiones de la memoria de usuario. Si pid es None, es un hueco libre
 particiones = [{"id": 1, "inicio": MEM_SO, "tam": MEM_USER, "pid": None}]
 _sig_id_particion = 2
@@ -188,7 +187,7 @@ def informe(t_total):
     tabla2.add_column('Espera')
     
     for p in sorted(Finalizados, key=lambda p: p["id"]):
-        p["retorno"] = p["fin"] - p["arribo"]
+        p["retorno"] = p["fin"] - arribos_nuevo[p["id"]]
         p["espera"] = p["retorno"] - p["irrupcion"]
         tabla2.add_row(''+str(p['id']), str(p['arribo']),str(p['irrupcion']),str(p['fin']),str(p['retorno']),str(p['espera']))
     console.print(tabla2)
@@ -211,29 +210,31 @@ def main():
 
         eventos = []
 
-        # a) Entran los procesos nuevos (siempre que no pasemos los 5 en el sistema)
+        # Entran los procesos nuevos (siempre que no pasemos los 5 en el sistema)
         while Arribos and Arribos[0]["arribo"] <= t and en_sistema() < MAX_EN_SISTEMA:
             p = Arribos.pop(0)
             part = best_fit(p)
             if part:
                 Listos.append(p)
                 eventos.append(f"Arribó {p['id']} -> Listos (partición {part['id']})")
+                if not p['id'] in arribos_nuevo.keys():
+                    arribos_nuevo[p['id']] = t
             else:
                 ListSus.append(p)
                 eventos.append(f"Arribó {p['id']} -> Listos y suspendidos (no hay hueco)")
 
-        # b) SRTF: vemos quién tiene que estar en la CPU
+        # SRTF: vemos quién tiene que estar en la CPU
         planificar()
         if eventos:
             mostrar(t, eventos)
 
-        # c) La CPU trabaja una unidad de tiempo
+        #La CPU trabaja una unidad de tiempo
         if Ejecucion:
             p = Ejecucion[0]
             p["TI"] -= 1
             t += 1
 
-            # d) Si terminó: liberamos la memoria y vemos si algún suspendido ya entra
+            # Si terminó: liberamos la memoria y vemos si algún suspendido ya entra
             if p["TI"] == 0:
                 p["fin"] = t
                 liberar(p)
@@ -244,14 +245,14 @@ def main():
                     if part:
                         ListSus.remove(q)
                         Listos.append(q)
+                        if not q['id'] in arribos_nuevo.keys():  ## esto podria ser una funcion
+                            arribos_nuevo[q['id']] = t
                         eventos.append(f"{q['id']} pasa de Listos y suspendidos a Listos (partición {part['id']})")
                 planificar()
                 mostrar(t, eventos)
         else:
             t += 1
-
+        #print(arribos_nuevo) 
     informe(t)
 
-
-if __name__ == "__main__":
-    main()
+main()
