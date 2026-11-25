@@ -12,7 +12,8 @@ MEM_USER = 450
 MAX_EN_SISTEMA = 5    # tope entre Ejecución + Listos + Listos/Suspendidos
 MAX_PROCESOS = 10   
 
-Arribos = []       
+eventos = []
+nuevos = []       
 Listos = []
 ListSus = []      
 Ejecucion = []     
@@ -21,6 +22,24 @@ arribos_nuevo=dict()
 # Tabla de particiones de la memoria de usuario. Si pid es None, es un hueco libre
 particiones = [{"id": 1, "inicio": MEM_SO, "tam": MEM_USER, "pid": None}]
 _sig_id_particion = 2
+
+
+def fragExterna(p):
+    global eventos
+    huecos = [x["tam"] for x in particiones if x["pid"] is None]
+    huecos_libre = sum(huecos)
+    max_h = max(huecos, default=0)
+
+    if p["tam"] > huecos_libre:
+        eventos.append(f"[blue bold] Espacio insuficiente para {p['id']}")
+    elif p["tam"] > max_h:
+        ##eventos.append(f"[red bold]**{p["id"]} FRAGMENTACION EXTERNA:" + f"[white] el espacio libre total es de {huecos_libre}Kb\npero el mayor hueco contiguo es de {max_h}Kb. (requiere al menos {p["tam"]}Kb)")
+        frag_ext = huecos_libre - max_h  # o huecos_libre, según el criterio que elijas
+        eventos.append(
+        f"[red bold]P{p['id']} FRAGMENTACION EXTERNA:[/red bold] "
+        f"libre total {huecos_libre}Kb, mayor hueco {max_h}Kb "
+        f"(< {p['tam']}Kb requeridos) | frag. externa: {frag_ext}Kb"
+)
 
 # Archivo de entrada
 def controldeArchivo():
@@ -48,7 +67,9 @@ def csvtolist(ruta):
     if not filas:
         raise SystemExit("El archivo no contiene procesos.")
     if len(filas) > MAX_PROCESOS:
-        raise SystemExit(f"El archivo tiene {len(filas)} procesos; el máximo es {MAX_PROCESOS}.")
+        print(f"[bold red]ERROR:[/bold red] El archivo tiene {len(filas)} procesos; el máximo es {MAX_PROCESOS}."
+              f"\n Se ejecutará el simulador sin los procesos n>10")
+        filas=filas[0:9]
 
     ids = set()
     for n, fila in enumerate(filas, start=1):
@@ -70,14 +91,19 @@ def csvtolist(ruta):
             raise SystemExit(f"Proceso {n}: el Id {pid} está repetido.")
         if tam <= 0 or irrupcion <= 0 or arribo < 0:
             raise SystemExit(f"Proceso {n}: tamaño e irrupción deben ser > 0 y el arribo >= 0.")
-        if tam > MEM_USER:
-            raise SystemExit(f"Proceso {n}: pide {tam}K y la memoria de usuario es de {MEM_USER}K.")
         
-        ids.add(pid)
-        Arribos.append({"id": pid, "tam": tam, "arribo": arribo,
-                        "irrupcion": irrupcion, "TI": irrupcion})
 
-    Arribos.sort(key=lambda p: (p["arribo"], p["id"]))
+        if tam <= MEM_USER:
+            nuevos.append({"id": pid, "tam": tam, "arribo": arribo,
+                        "irrupcion": irrupcion, "TI": irrupcion})
+            ids.add(pid)
+
+        else:
+            print(f"[bold red]ERROR:[/bold red] Proceso {n} requiere {tam}Kb y la memoria total de usuario es de {MEM_USER}Kb. No es agregado.")
+        
+                
+
+    nuevos.sort(key=lambda p: (p["arribo"], p["id"]))
 
 
 # MEMORIA: Best-Fit con particiones variables
@@ -88,6 +114,7 @@ def best_fit(p):
     global _sig_id_particion
     huecos = [x for x in particiones if x["pid"] is None and x["tam"] >= p["tam"]]
     if not huecos:
+        fragExterna(p)
         return None
     h = min(huecos, key=lambda x: x["tam"])
     if h["tam"] > p["tam"]:  # si sobra lugar, partimos el hueco y lo que sobra queda libre al lado
@@ -160,17 +187,16 @@ def mostrar(t, eventos):
     tabla.add_column("Inicio")
     tabla.add_column("Tamaño")
     tabla.add_column("Proceso")
-    tabla.add_column("Frag. interna")
     for x in particiones:
         if x["pid"] is None:
-            tabla.add_row(str(x['id']),str(x['inicio']), str(x['tam']),'libre', '-', style="yellow")
+            tabla.add_row(str(x['id']),str(x['inicio']), str(x['tam']),'libre', style="yellow")
         else:
-            tabla.add_row(str(x['id']),str(x['inicio']),str(x['tam']),str(x['pid']),'0')
+            tabla.add_row(str(x['id']),str(x['inicio']),str(x['tam']),str(x['pid']))
     console.print(tabla)
 
     print(f"\nListos:                 {fmt(Listos)}")
     print(f"Listos y suspendidos:   {fmt(ListSus)}")
-    print(f"Nuevos (sin admitir):   {fmt(Arribos)}")
+    print(f"Nuevos (sin admitir):   {fmt(nuevos)}")
     input("\nPresione Enter para continuar...")
 
 
@@ -201,18 +227,18 @@ def informe(t_total):
 def main():
     ruta = controldeArchivo()
     csvtolist(ruta)
-
+    global eventos
+    
     t = 0
-    while Arribos or en_sistema() > 0:
+    while nuevos or en_sistema() > 0:
         # si no hay nadie en el sistema, saltamos directo al próximo arribo (así no mostramos ticks vacíos)
-        if en_sistema() == 0 and Arribos[0]["arribo"] > t:
-            t = Arribos[0]["arribo"]
+        if en_sistema() == 0 and nuevos[0]["arribo"] > t:
+            t = nuevos[0]["arribo"]
 
-        eventos = []
 
         # Entran los procesos nuevos (siempre que no pasemos los 5 en el sistema)
-        while Arribos and Arribos[0]["arribo"] <= t and en_sistema() < MAX_EN_SISTEMA:
-            p = Arribos.pop(0)
+        while nuevos and nuevos[0]["arribo"] <= t and en_sistema() < MAX_EN_SISTEMA:
+            p = nuevos.pop(0)
             part = best_fit(p)
             if part:
                 Listos.append(p)
